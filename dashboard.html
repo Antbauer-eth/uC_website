@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Climbr - Athlete Monitoring</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" xintegrity="sha512-Y3Wj3hSj6c1g+x1i5G5qM4r1pW6I0dYJv2V2eR8z+s3hK1sN4S7+h4i8Q6h8w8Q6h8w8Q6h8w8Q6h8w8Q6h8w8Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .moving { animation: pulse-red 1s infinite; }
+        .resting { animation: pulse-green 1s infinite; }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans p-4">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { 'inter': '#cbd5e1' },
+                }
+            }
+        }
+    </script>
+
+    <header class="text-center mb-8">
+        <h1 class="text-4xl font-bold text-inter">Climbr - Performance Monitor</h1>
+        <p id="connection-status" class="text-sm mt-1 font-medium text-yellow-500">
+            MQTT Status: DISCONNECTED
+        </p>
+
+        <!-- MODE SWITCH BUTTONS -->
+        <div class="flex justify-center space-x-4 mt-4">
+            <button id="mode-standard" onclick="setMode('standard')" class="px-4 py-2 rounded-lg font-semibold bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-md">
+                STANDARD (Lead)
+            </button>
+            <button id="mode-bouldering" onclick="setMode('bouldering')" class="px-4 py-2 rounded-lg font-semibold bg-gray-600 hover:bg-gray-700 transition duration-150 shadow-md">
+                BOULDERING
+            </button>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-6xl mx-auto">
+
+        <!-- 1. STATUS CARD -->
+        <div id="status-card" class="bg-gray-800 p-6 rounded-xl shadow-lg transition duration-300 h-80">
+            <h2 class="text-2xl font-semibold mb-4 text-inter">STATUS & REST TIME</h2>
+            <div id="status-content">
+                <!-- Standard Mode Content -->
+                <div id="mode-standard-view" class="space-y-4">
+                    <div class="flex items-center space-x-4">
+                        <span id="motion-display-std" class="text-5xl font-extrabold text-white bg-green-500 resting px-4 py-2 rounded-lg">RESTING</span>
+                        <p class="text-xl text-gray-400">Movement detected?</p>
+                    </div>
+                    <p class="text-md text-gray-500">Current Motion Threshold: 10000</p>
+                </div>
+
+                <!-- Bouldering Mode Content -->
+                <div id="mode-bouldering-view" class="space-y-4 hidden">
+                    <div class="flex items-center justify-between">
+                        <p class="text-xl text-gray-400">Target Rest Time (s):</p>
+                        <input type="number" id="rest-timer-input" value="120" min="10" class="w-20 text-right p-1 bg-gray-700 rounded-lg text-lg text-white">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <p class="text-xl text-white">Remaining Time:</p>
+                        <span id="rest-timer-display" class="text-3xl font-extrabold text-blue-400">--:--</span>
+                    </div>
+                    <button onclick="startTimer()" id="timer-btn" class="w-full px-4 py-2 bg-indigo-600 rounded-lg font-semibold hover:bg-indigo-700 transition">Start Rest</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. HEART RATE CARD -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg h-80">
+            <h2 class="text-2xl font-semibold mb-4 text-inter">PULSE (BPM)</h2>
+            <div class="flex items-center justify-between">
+                <span id="bpm-value" class="text-5xl font-extrabold text-red-400">--</span>
+                <!-- Pulse Low Indicator (Bouldering Mode) -->
+                <span id="pulse-status" class="text-lg font-bold text-green-500 hidden"></span>
+            </div>
+            <div class="h-44 mt-4"> 
+                <canvas id="bpmChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 3. O2 SATURATION CARD -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg h-80">
+            <h2 class="text-2xl font-semibold mb-4 text-inter">O₂ SATURATION (SpO₂)</h2>
+            <div class="flex items-center justify-between">
+                <span id="spo2-value" class="text-5xl font-extrabold text-blue-400">--</span>
+                <p class="text-xl text-gray-400">%</p>
+            </div>
+            <div class="h-44 mt-4"> 
+                <canvas id="spo2Chart"></canvas>
+            </div>
+        </div>
+
+        <!-- 4. TEMPERATURE CARD -->
+        <div class="bg-gray-800 p-6 rounded-xl shadow-lg h-80">
+            <h2 class="text-2xl font-semibold mb-4 text-inter">TEMPERATURE</h2>
+            <div class="flex items-center justify-between">
+                <span id="temp-value" class="text-5xl font-extrabold text-yellow-400">--</span>
+                 <!-- Temperature Cool Indicator (Bouldering Mode) -->
+                <span id="temp-status" class="text-lg font-bold text-green-500 hidden"></span>
+            </div>
+            <div class="h-44 mt-4"> 
+                <canvas id="tempChart"></canvas>
+            </div>
+        </div>
+        
+    </div>
+
+    <footer class="text-center mt-8 text-gray-600 text-sm">
+        Data streaming via MQTT Broker: broker.hivemq.com (Topic: climb/data)
+    </footer>
+
+    <script>
+        // --- GLOBAL STATE ---
+        const MAX_DATA_POINTS = 30;
+        let currentMode = 'standard';
+        let chartLabels = [];
+        let bpmData = [];
+        let spo2Data = [];
+        let tempData = [];
+
+        // --- BOULDERING LOGIC STATE ---
+        const RECOVERY_WINDOW_SIZE = 10; // Check last 10 seconds (10 data points)
+        let bpmHistory = Array(RECOVERY_WINDOW_SIZE).fill(100); // Initialize high
+        let tempHistory = Array(RECOVERY_WINDOW_SIZE).fill(40); // Initialize high
+        let bpmLowEnough = false;
+        let tempCoolEnough = false;
+
+        let timerInterval;
+        let timerRunning = false;
+        let timeRemaining = 0;
+
+        // --- MODE SWITCHING ---
+        function setMode(mode) {
+            currentMode = mode;
+            const stdBtn = document.getElementById('mode-standard');
+            const bldBtn = document.getElementById('mode-bouldering');
+            const stdView = document.getElementById('mode-standard-view');
+            const bldView = document.getElementById('mode-bouldering-view');
+            const pulseStatus = document.getElementById('pulse-status');
+            const tempStatus = document.getElementById('temp-status');
+
+            if (mode === 'bouldering') {
+                stdBtn.classList.replace('bg-blue-600', 'bg-gray-600');
+                bldBtn.classList.replace('bg-gray-600', 'bg-blue-600');
+                stdView.classList.add('hidden');
+                bldView.classList.remove('hidden');
+                pulseStatus.classList.remove('hidden');
+                tempStatus.classList.remove('hidden');
+            } else {
+                bldBtn.classList.replace('bg-blue-600', 'bg-gray-600');
+                stdBtn.classList.replace('bg-gray-600', 'bg-blue-600');
+                bldView.classList.add('hidden');
+                stdView.classList.remove('hidden');
+                pulseStatus.classList.add('hidden');
+                tempStatus.classList.add('hidden');
+                clearInterval(timerInterval); 
+                timerRunning = false;
+                document.getElementById('rest-timer-display').textContent = '--:--';
+                document.getElementById('timer-btn').textContent = 'Start Rest';
+            }
+        }
+        
+        // Initialize to standard mode
+        setMode('standard');
+
+        // --- TIMER LOGIC ---
+        function startTimer() {
+            const btn = document.getElementById('timer-btn');
+            if (timerRunning) {
+                clearInterval(timerInterval);
+                timerRunning = false;
+                btn.textContent = 'Start Rest';
+                return;
+            }
+
+            const inputTime = parseInt(document.getElementById('rest-timer-input').value) * 1000;
+            if (isNaN(inputTime) || inputTime <= 0) return;
+
+            timeRemaining = inputTime;
+            timerRunning = true;
+            btn.textContent = 'Stop Rest';
+
+            timerInterval = setInterval(() => {
+                timeRemaining -= 1000;
+                const minutes = Math.floor(timeRemaining / 60000);
+                const seconds = Math.floor((timeRemaining % 60000) / 1000);
+                document.getElementById('rest-timer-display').textContent = 
+                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                if (timeRemaining <= 0) {
+                    clearInterval(timerInterval);
+                    timerRunning = false;
+                    btn.textContent = 'Time Up!';
+                }
+            }, 1000);
+        }
+        
+        // --- RECOVERY LOGIC CHECK ---
+        function checkRecoveryStatus() {
+            // Check Pulse: must be <= 65 BPM for 10 consecutive seconds
+            const pulseStatusEl = document.getElementById('pulse-status');
+            const pulseLow = bpmHistory.every(bpm => bpm <= 65 && bpm > 0); 
+            
+            if (pulseLow) {
+                pulseStatusEl.textContent = "pulse is low enough";
+                pulseStatusEl.classList.add('text-green-500');
+                pulseStatusEl.classList.remove('text-red-500');
+            } else {
+                pulseStatusEl.textContent = "pulse is high";
+                pulseStatusEl.classList.add('text-red-500');
+                pulseStatusEl.classList.remove('text-green-500');
+            }
+            
+            // Check Temp: must be <= 37.0 °C for 10 consecutive seconds
+            const tempStatusEl = document.getElementById('temp-status');
+            const tempCool = tempHistory.every(temp => temp <= 37.0);
+
+            if (tempCool) {
+                tempStatusEl.textContent = "you are cool enough";
+                tempStatusEl.classList.add('text-green-500');
+                tempStatusEl.classList.remove('text-red-500');
+            } else {
+                tempStatusEl.textContent = "body is warm";
+                tempStatusEl.classList.add('text-red-500');
+                tempStatusEl.classList.remove('text-green-500');
+            }
+        }
+
+
+        // --- CHART INITIALIZATION ---
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false, 
+            scales: {
+                x: { display: false },
+                y: { beginAtZero: false, min: 0, max: 110, ticks: { color: '#bbb' }, grid: { color: '#333' } }
+            },
+            plugins: { legend: { display: false } }
+        };
+
+        const bpmCtx = document.getElementById('bpmChart').getContext('2d');
+        const bpmChart = new Chart(bpmCtx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{ label: 'BPM', data: bpmData, borderColor: '#f87171', tension: 0.3, fill: true, backgroundColor: 'rgba(248, 113, 113, 0.1)' }]
+            },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, min: 40, max: 200 } } }
+        });
+
+        const spo2Ctx = document.getElementById('spo2Chart').getContext('2d');
+        const spo2Chart = new Chart(spo2Ctx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{ label: 'SpO2', data: spo2Data, borderColor: '#60a5fa', tension: 0.3, fill: true, backgroundColor: 'rgba(96, 165, 250, 0.1)' }]
+            },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, min: 85, max: 100 } } }
+        });
+
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{ label: 'Temp (°C)', data: tempData, borderColor: '#facc15', tension: 0.3, fill: true, backgroundColor: 'rgba(250, 202, 21, 0.1)' }]
+            },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, min: 20, max: 35 } } }
+        });
+
+        // --- MQTT CONNECTION LOGIC ---
+
+        const client = new Paho.MQTT.Client(
+            "broker.hivemq.com", 
+            8884, 
+            "/mqtt", 
+            "web_client_" + parseInt(Math.random() * 100000, 10).toString()
+        );
+
+        client.onConnectionLost = onConnectionLost;
+        client.onMessageArrived = onMessageArrived;
+
+        client.connect({
+            onSuccess: onConnect,
+            onFailure: onFailure,
+            useSSL: true, // IMPORTANT: Use SSL for port 8884
+            cleanSession: true 
+        });
+
+        function onConnect() {
+            document.getElementById('connection-status').textContent = 'MQTT Status: CONNECTED';
+            document.getElementById('connection-status').classList.remove('text-yellow-500');
+            document.getElementById('connection-status').classList.add('text-green-500');
+            
+            client.subscribe("climb/data", { qos: 0 });
+            console.log("Subscribed to climb/data");
+        }
+
+        function onFailure(responseObject) {
+            document.getElementById('connection-status').textContent = 'MQTT Status: FAILED';
+            console.error("Connection failed: " + responseObject.errorMessage);
+        }
+
+        function onConnectionLost(responseObject) {
+            document.getElementById('connection-status').textContent = 'MQTT Status: LOST';
+            document.getElementById('connection-status').classList.remove('text-green-500');
+            document.getElementById('connection-status').classList.add('text-red-500');
+            if (responseObject.errorCode !== 0) {
+                console.error("Connection lost: " + responseObject.errorMessage);
+            }
+        }
+
+        function updateCharts() {
+            if (chartLabels.length > MAX_DATA_POINTS) {
+                chartLabels.shift();
+                bpmData.shift();
+                spo2Data.shift();
+                tempData.shift();
+            }
+
+            bpmChart.update();
+            spo2Chart.update();
+            tempChart.update();
+        }
+        
+        // --- MESSAGE HANDLER ---
+        function onMessageArrived(message) {
+            try {
+                const payload = JSON.parse(message.payloadString);
+                
+                const now = new Date();
+                const timeLabel = now.getMinutes().toString().padStart(2, '0') + ':' + now.getSeconds().toString().padStart(2, '0');
+
+                // 1. Update Display Values
+                document.getElementById('bpm-value').textContent = payload.bpm.toFixed(1);
+                document.getElementById('spo2-value').textContent = payload.spo2.toFixed(1);
+                document.getElementById('temp-value').textContent = payload.temp.toFixed(2);
+                
+                // Motion display only updates in Standard mode
+                const motionDisplayStd = document.getElementById('motion-display-std');
+                if (motionDisplayStd) {
+                    motionDisplayStd.textContent = payload.motion;
+                    if (payload.motion === 'MOVING') {
+                        motionDisplayStd.classList.remove('resting', 'bg-green-500');
+                        motionDisplayStd.classList.add('moving', 'bg-red-500');
+                    } else {
+                        motionDisplayStd.classList.remove('moving', 'bg-red-500');
+                        motionDisplayStd.classList.add('resting', 'bg-green-500');
+                    }
+                }
+                
+
+                // 2. Update Bouldering Logic History
+                // Shift data history arrays to the left and add the new data point
+                bpmHistory.shift();
+                bpmHistory.push(payload.bpm);
+                
+                tempHistory.shift();
+                tempHistory.push(payload.temp);
+                
+                // Run recovery check if in Bouldering mode
+                if (currentMode === 'bouldering') {
+                    checkRecoveryStatus();
+                }
+
+                // 3. Add new data to arrays for charts
+                chartLabels.push(timeLabel);
+                bpmData.push(payload.bpm);
+                spo2Data.push(payload.spo2);
+                tempData.push(payload.temp);
+
+                // 4. Draw charts
+                updateCharts();
+
+            } catch (e) {
+                console.error("Failed to parse JSON message: " + message.payloadString, e);
+            }
+        }
+    </script>
+
+</body>
+</html>
