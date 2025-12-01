@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Climbr - Athlete Monitoring</title>
+    <title> Athlete Monitoring</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" xintegrity="sha512-Y3Wj3hSj6c1g+x1i5G5qM4r1pW6I0dYJv2V2eR8z+s3hK1sN4S7+h4i8Q6h8w8Q6h8w8Q6h8w8Q6h8w8Q6h8w8Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -35,7 +35,7 @@
     </script>
 
     <header class="text-center mb-8">
-        <h1 class="text-4xl font-bold text-inter">Climbr - Performance Monitor</h1>
+        <h1 class="text-4xl font-bold text-inter">Performance Monitor</h1>
         <p id="connection-status" class="text-sm mt-1 font-medium text-yellow-500">
             MQTT Status: DISCONNECTED
         </p>
@@ -43,7 +43,7 @@
         <!-- MODE SWITCH BUTTONS -->
         <div class="flex justify-center space-x-4 mt-4">
             <button id="mode-standard" onclick="setMode('standard')" class="px-4 py-2 rounded-lg font-semibold bg-blue-600 hover:bg-blue-700 transition duration-150 shadow-md">
-                STANDARD (Lead)
+                STANDARD
             </button>
             <button id="mode-bouldering" onclick="setMode('bouldering')" class="px-4 py-2 rounded-lg font-semibold bg-gray-600 hover:bg-gray-700 transition duration-150 shadow-md">
                 BOULDERING
@@ -63,7 +63,6 @@
                         <span id="motion-display-std" class="text-5xl font-extrabold text-white bg-green-500 resting px-4 py-2 rounded-lg">RESTING</span>
                         <p class="text-xl text-gray-400">Movement detected?</p>
                     </div>
-                    <p class="text-md text-gray-500">Current Motion Threshold: 10000</p>
                 </div>
 
                 <!-- Bouldering Mode Content -->
